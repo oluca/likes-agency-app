@@ -40,6 +40,7 @@ export interface CreateJobResponse {
 export const STYLE_PRESETS: { label: string; value: string }[] = [
   { label: "Standard-Look", value: "" },
   { label: "Maus Stack", value: "maus_stack" },
+  { label: "Max Makros Mint", value: "max_makros_mint" },
 ];
 
 export const WHISPER_MODELS: WhisperModel[] = ["tiny", "base", "small", "medium", "large"];
