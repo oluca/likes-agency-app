@@ -1,26 +1,144 @@
 @import "tailwindcss";
 
+/*
+  Design tokens.
+  Brand palette (fixed): Blush Rose #E54F6D, Onyx #0F0F0F, Graphite #2D2E2E, White #FBFBFB.
+  Contrast notes: text on a rose fill is Onyx (5.2:1); white on rose would only reach 3.6:1.
+  Rose used as small text on light surfaces is darkened toward Onyx (--accent-text, 5.1:1).
+*/
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  --rose: #e54f6d;
+  --onyx: #0f0f0f;
+  --graphite: #2d2e2e;
+  --paper: #fbfbfb;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Light theme */
+  --canvas: color-mix(in srgb, var(--paper) 93%, var(--graphite));
+  --surface: var(--paper);
+  --sunken: color-mix(in srgb, var(--paper) 95%, var(--graphite));
+  --line: color-mix(in srgb, var(--paper) 86%, var(--graphite));
+  --line-strong: color-mix(in srgb, var(--paper) 70%, var(--graphite));
+  --fg: var(--onyx);
+  --muted: color-mix(in srgb, var(--paper) 30%, var(--graphite));
+  --accent: var(--rose);
+  --accent-fg: var(--onyx);
+  --accent-text: color-mix(in srgb, var(--rose) 80%, var(--onyx));
+  --accent-soft: color-mix(in srgb, var(--rose) 10%, var(--paper));
+  --shadow-card: 0 1px 2px rgb(15 15 15 / 0.05), 0 0 0 1px rgb(15 15 15 / 0.02);
+  --shadow-pop: 0 12px 32px -8px rgb(15 15 15 / 0.22), 0 2px 6px rgb(15 15 15 / 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --canvas: var(--onyx);
+    --surface: var(--graphite);
+    --sunken: color-mix(in srgb, var(--onyx) 55%, var(--graphite));
+    --line: color-mix(in srgb, var(--graphite) 82%, var(--paper));
+    --line-strong: color-mix(in srgb, var(--graphite) 60%, var(--paper));
+    --fg: var(--paper);
+    --muted: color-mix(in srgb, var(--graphite) 38%, var(--paper));
+    --accent-text: color-mix(in srgb, var(--rose) 80%, var(--paper));
+    --accent-soft: color-mix(in srgb, var(--rose) 16%, var(--graphite));
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-pop: 0 16px 40px -8px rgb(0 0 0 / 0.7), 0 0 0 1px rgb(251 251 251 / 0.06);
   }
 }
 
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-text: var(--accent-text);
+  --color-accent-soft: var(--accent-soft);
+  --color-onyx: var(--onyx);
+  --color-graphite: var(--graphite);
+  --color-paper: var(--paper);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+  --animate-toast-in: toast-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fade-in 150ms ease-out;
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+}
+
+/*
+  Radius system: controls (buttons, inputs, menus) 8px, cards and dialogs 12px, badges 6px.
+*/
+html {
+  color-scheme: light dark;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers align in tables and KPIs. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--rose) 35%, transparent);
+}
+
+dialog {
+  color: var(--fg);
+}
+dialog::backdrop {
+  background: rgb(15 15 15 / 0.6);
+  animation: fade-in 150ms ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

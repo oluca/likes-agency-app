@@ -1,24 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { DownloadSimple, WarningCircle } from "@phosphor-icons/react/ssr";
 import { cancelJob, downloadJobUrl, getJob, getJobLog, ApiError } from "@/lib/api-client";
+import { ConfirmDialog } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { useToast } from "@/components/ui/toast";
+import { btn } from "@/lib/ui";
 import type { Job } from "@/lib/types";
-
-const STATUS_LABEL: Record<Job["status"], string> = {
-  queued: "In Warteschlange",
-  running: "Läuft",
-  done: "Fertig",
-  failed: "Fehlgeschlagen",
-  canceled: "Abgebrochen",
-};
-
-const STATUS_COLOR: Record<Job["status"], string> = {
-  queued: "bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-200",
-  running: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  done: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  failed: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-  canceled: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-};
 
 const ACTIVE_STATUSES: Job["status"][] = ["queued", "running"];
 
@@ -27,10 +17,12 @@ interface JobCardProps {
 }
 
 export function JobCard({ jobId }: JobCardProps) {
+  const toast = useToast();
   const [job, setJob] = useState<Job | null>(null);
   const [log, setLog] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const statusRef = useRef<Job["status"] | null>(null);
 
@@ -41,9 +33,15 @@ export function JobCard({ jobId }: JobCardProps) {
       try {
         const current = await getJob(jobId);
         if (cancelled) return;
+        const previous = statusRef.current;
         setJob(current);
         statusRef.current = current.status;
         setError(null);
+
+        if (previous && ACTIVE_STATUSES.includes(previous)) {
+          if (current.status === "done") toast({ tone: "success", title: "Render fertig", description: "Das Video kann heruntergeladen werden." });
+          if (current.status === "failed") toast({ tone: "error", title: "Render fehlgeschlagen" });
+        }
 
         try {
           const logResult = await getJobLog(jobId);
@@ -68,7 +66,7 @@ export function JobCard({ jobId }: JobCardProps) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [jobId]);
+  }, [jobId, toast]);
 
   async function handleCancel() {
     setCanceling(true);
@@ -76,16 +74,22 @@ export function JobCard({ jobId }: JobCardProps) {
       await cancelJob(jobId);
       const current = await getJob(jobId);
       setJob(current);
+      statusRef.current = current.status;
+      toast({ tone: "info", title: "Job abgebrochen" });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Abbrechen fehlgeschlagen.");
+      const message = err instanceof ApiError ? err.message : "Abbrechen fehlgeschlagen.";
+      setError(message);
+      toast({ tone: "error", title: "Abbrechen fehlgeschlagen", description: message });
     } finally {
       setCanceling(false);
+      setConfirmOpen(false);
     }
   }
 
   if (error && !job) {
     return (
-      <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+      <div role="alert" className="flex items-start gap-2.5 rounded-lg border border-accent/50 bg-accent-soft p-4 text-sm text-accent-text">
+        <WarningCircle size={18} weight="fill" className="mt-0.5 shrink-0" />
         {error}
       </div>
     );
@@ -93,59 +97,68 @@ export function JobCard({ jobId }: JobCardProps) {
 
   if (!job) {
     return (
-      <div className="rounded-md border border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-800">
-        Lade Job…
+      <div className="flex flex-col gap-3" aria-busy="true" aria-label="Lade Job">
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-4 w-40" />
+          <Skeleton className="h-6 w-24" />
+        </div>
+        <Skeleton className="h-24 w-full" />
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border border-zinc-200 p-4 dark:border-zinc-800">
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-xs text-zinc-500">{job.id}</span>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_COLOR[job.status]}`}>
-          {STATUS_LABEL[job.status]}
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <span className="min-w-0 truncate font-mono text-xs text-muted" title={job.id}>
+          {job.id}
         </span>
+        <StatusBadge status={job.status} />
       </div>
 
       {log && (
-        <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-zinc-50 p-2 text-xs text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+        <pre className="max-h-44 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-graphite bg-onyx p-3 font-mono text-xs leading-relaxed text-paper/85">
           {log}
         </pre>
       )}
 
       {job.status === "failed" && job.error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <p role="alert" className="rounded-lg border border-accent/50 bg-accent-soft px-3 py-2.5 text-sm text-accent-text">
           {job.error}
         </p>
       )}
 
       {error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <p role="alert" className="rounded-lg border border-accent/50 bg-accent-soft px-3 py-2.5 text-sm text-accent-text">
           {error}
         </p>
       )}
 
-      <div className="flex gap-2">
-        {job.status === "done" && (
-          <a
-            href={downloadJobUrl(job.id)}
-            className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-          >
-            Download
-          </a>
-        )}
-        {job.status === "queued" && (
-          <button
-            type="button"
-            onClick={handleCancel}
-            disabled={canceling}
-            className="rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-900"
-          >
-            {canceling ? "Wird abgebrochen…" : "Abbrechen"}
-          </button>
-        )}
-      </div>
+      {(job.status === "done" || job.status === "queued") && (
+        <div className="flex gap-2">
+          {job.status === "done" && (
+            <a href={downloadJobUrl(job.id)} className={btn("primary")}>
+              <DownloadSimple size={16} weight="bold" />
+              Download
+            </a>
+          )}
+          {job.status === "queued" && (
+            <button type="button" onClick={() => setConfirmOpen(true)} disabled={canceling} className={btn("secondary")}>
+              {canceling ? "Wird abgebrochen…" : "Abbrechen"}
+            </button>
+          )}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={handleCancel}
+        pending={canceling}
+        title="Job abbrechen?"
+        description="Der Job wird aus der Warteschlange entfernt und nicht gerendert."
+        confirmLabel={canceling ? "Wird abgebrochen…" : "Job abbrechen"}
+      />
     </div>
   );
 }

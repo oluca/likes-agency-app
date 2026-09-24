@@ -1,7 +1,12 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
+import { Play, SpinnerGap, UploadSimple, VideoCamera, WarningCircle } from "@phosphor-icons/react/ssr";
 import { createJob, ApiError } from "@/lib/api-client";
+import { Switch } from "@/components/ui/switch";
+import { Tabs } from "@/components/ui/tabs";
+import { useToast } from "@/components/ui/toast";
+import { btn, cn, helpClass, inputClass, labelClass } from "@/lib/ui";
 import {
   ENGINES,
   GPU_MODES,
@@ -14,12 +19,27 @@ interface RenderFormProps {
   onJobCreated: (jobId: string) => void;
 }
 
-const inputClass =
-  "w-full rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
-const labelClass = "text-sm font-medium text-zinc-700 dark:text-zinc-300";
+function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className={labelClass} htmlFor={htmlFor}>
+        {label}
+      </label>
+      {children}
+      {hint && <p className={helpClass}>{hint}</p>}
+    </div>
+  );
+}
+
+function formatSize(bytes: number) {
+  return bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+}
 
 export function RenderForm({ onJobCreated }: RenderFormProps) {
   const formId = useId();
+  const toast = useToast();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
@@ -73,247 +93,182 @@ export function RenderForm({ onJobCreated }: RenderFormProps) {
     try {
       const result = await createJob(file, params);
       onJobCreated(result.job_id);
+      toast({ tone: "success", title: "Render gestartet", description: "Der Job wurde in die Warteschlange gestellt." });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Render konnte nicht gestartet werden.");
+      const message = err instanceof ApiError ? err.message : "Render konnte nicht gestartet werden.";
+      setError(message);
+      toast({ tone: "error", title: "Start fehlgeschlagen", description: message });
     } finally {
       setSubmitting(false);
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-      <div className="flex flex-col gap-1.5">
-        <label className={labelClass} htmlFor={`${formId}-file`}>
-          Video-Datei
+  const id = (name: string) => `${formId}-${name}`;
+
+  const videoTab = (
+    <div className="flex flex-col gap-5">
+      <div>
+        <span className={labelClass}>Video-Datei</span>
+        <label
+          htmlFor={id("file")}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+            const dropped = e.dataTransfer.files?.[0];
+            if (dropped && fileInput.current) {
+              fileInput.current.files = e.dataTransfer.files;
+              setFile(dropped);
+              setError(null);
+            }
+          }}
+          className={cn(
+            "flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-8 text-center transition-colors duration-150 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-accent",
+            dragging ? "border-accent bg-accent-soft" : "border-line-strong hover:border-fg/40 hover:bg-sunken"
+          )}
+        >
+          <input
+            ref={fileInput}
+            id={id("file")}
+            type="file"
+            accept="video/*"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setError(null);
+            }}
+            className="sr-only"
+          />
+          {file ? (
+            <>
+              <VideoCamera size={26} className="text-accent-text" />
+              <span className="max-w-full truncate text-sm font-medium text-fg">{file.name}</span>
+              <span className="tabular text-[13px] text-muted">{formatSize(file.size)} · zum Ändern klicken</span>
+            </>
+          ) : (
+            <>
+              <UploadSimple size={26} className="text-muted" />
+              <span className="text-sm font-medium text-fg">Video hierher ziehen oder auswählen</span>
+              <span className="text-[13px] text-muted">MP4, MOV und andere Videoformate</span>
+            </>
+          )}
         </label>
-        <input
-          id={`${formId}-file`}
-          type="file"
-          accept="video/*"
-          required
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className={inputClass}
-        />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label className={labelClass} htmlFor={`${formId}-start`}>
-            Start (s)
-          </label>
-          <input
-            id={`${formId}-start`}
-            type="number"
-            step="0.1"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className={inputClass}
-            placeholder="optional"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className={labelClass} htmlFor={`${formId}-end`}>
-            Ende (s)
-          </label>
-          <input
-            id={`${formId}-end`}
-            type="number"
-            step="0.1"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            className={inputClass}
-            placeholder="optional"
-          />
-        </div>
+        <Field label="Start (s)" htmlFor={id("start")}>
+          <input id={id("start")} type="number" step="0.1" value={start} onChange={(e) => setStart(e.target.value)} className={inputClass} placeholder="optional" />
+        </Field>
+        <Field label="Ende (s)" htmlFor={id("end")}>
+          <input id={id("end")} type="number" step="0.1" value={end} onChange={(e) => setEnd(e.target.value)} className={inputClass} placeholder="optional" />
+        </Field>
       </div>
 
-      <div className="flex flex-wrap gap-6">
-        <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={cutSilence}
-            onChange={(e) => setCutSilence(e.target.checked)}
-          />
-          Stille schneiden
-        </label>
-        <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-          <input type="checkbox" checked={zoom} onChange={(e) => setZoom(e.target.checked)} />
-          Zoom
-        </label>
-        <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-          <input type="checkbox" checked={sfx} onChange={(e) => setSfx(e.target.checked)} />
-          SFX
-        </label>
-        <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
-          <input
-            type="checkbox"
-            checked={autoEmphasis}
-            onChange={(e) => setAutoEmphasis(e.target.checked)}
-          />
-          Auto-Betonung
-        </label>
-      </div>
-
-      {cutSilence && (
-        <div className="grid grid-cols-2 gap-4 rounded-md bg-zinc-50 p-3 dark:bg-zinc-900">
-          <div className="flex flex-col gap-1.5">
-            <label className={labelClass} htmlFor={`${formId}-silence-min-dur`}>
-              Min. Stille-Dauer (s)
-            </label>
-            <input
-              id={`${formId}-silence-min-dur`}
-              type="number"
-              step="0.05"
-              value={silenceMinDur}
-              onChange={(e) => setSilenceMinDur(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className={labelClass} htmlFor={`${formId}-silence-keep`}>
-              Stille behalten (s)
-            </label>
-            <input
-              id={`${formId}-silence-keep`}
-              type="number"
-              step="0.05"
-              value={silenceKeep}
-              onChange={(e) => setSilenceKeep(e.target.value)}
-              className={inputClass}
-            />
-          </div>
-        </div>
-      )}
-
-      {!autoEmphasis && (
-        <>
-          <div className="flex flex-col gap-1.5">
-            <label className={labelClass} htmlFor={`${formId}-emphasis`}>
-              Betonung (kommagetrennt)
-            </label>
-            <input
-              id={`${formId}-emphasis`}
-              type="text"
-              value={emphasis}
-              onChange={(e) => setEmphasis(e.target.value)}
-              className={inputClass}
-              placeholder="wort1, wort2"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className={labelClass} htmlFor={`${formId}-emphasis-strong`}>
-              Starke Betonung (kommagetrennt)
-            </label>
-            <input
-              id={`${formId}-emphasis-strong`}
-              type="text"
-              value={emphasisStrong}
-              onChange={(e) => setEmphasisStrong(e.target.value)}
-              className={inputClass}
-              placeholder="wort1, wort2"
-            />
-          </div>
-        </>
-      )}
-
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div className="flex flex-col gap-1.5">
-          <label className={labelClass} htmlFor={`${formId}-whisper-model`}>
-            Whisper-Modell
-          </label>
-          <select
-            id={`${formId}-whisper-model`}
-            value={whisperModel}
-            onChange={(e) => setWhisperModel(e.target.value)}
-            className={inputClass}
-          >
-            {WHISPER_MODELS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className={labelClass} htmlFor={`${formId}-engine`}>
-            Engine
-          </label>
-          <select
-            id={`${formId}-engine`}
-            value={engine}
-            onChange={(e) => setEngine(e.target.value)}
-            className={inputClass}
-          >
-            {ENGINES.map((e) => (
-              <option key={e} value={e}>
-                {e}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className={labelClass} htmlFor={`${formId}-language`}>
-            Sprache
-          </label>
-          <input
-            id={`${formId}-language`}
-            type="text"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className={inputClass}
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className={labelClass} htmlFor={`${formId}-gpu`}>
-            GPU
-          </label>
-          <select
-            id={`${formId}-gpu`}
-            value={gpu}
-            onChange={(e) => setGpu(e.target.value)}
-            className={inputClass}
-          >
-            {GPU_MODES.map((g) => (
-              <option key={g} value={g}>
-                {g}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className={labelClass} htmlFor={`${formId}-style`}>
-          Style-Preset
-        </label>
-        <select
-          id={`${formId}-style`}
-          value={style}
-          onChange={(e) => setStyle(e.target.value)}
-          className={inputClass}
-        >
+      <Field label="Style-Preset" htmlFor={id("style")}>
+        <select id={id("style")} value={style} onChange={(e) => setStyle(e.target.value)} className={inputClass}>
           {STYLE_PRESETS.map((p) => (
             <option key={p.value} value={p.value}>
               {p.label}
             </option>
           ))}
         </select>
+      </Field>
+    </div>
+  );
+
+  const cutTab = (
+    <div className="flex flex-col gap-3">
+      <Switch checked={cutSilence} onChange={setCutSilence} label="Stille schneiden" description="Entfernt Pausen im Video." />
+      {cutSilence && (
+        <div className="grid grid-cols-2 gap-4 rounded-lg border border-line bg-sunken p-4">
+          <Field label="Min. Stille-Dauer (s)" htmlFor={id("silence-min-dur")}>
+            <input id={id("silence-min-dur")} type="number" step="0.05" value={silenceMinDur} onChange={(e) => setSilenceMinDur(e.target.value)} className={inputClass} />
+          </Field>
+          <Field label="Stille behalten (s)" htmlFor={id("silence-keep")}>
+            <input id={id("silence-keep")} type="number" step="0.05" value={silenceKeep} onChange={(e) => setSilenceKeep(e.target.value)} className={inputClass} />
+          </Field>
+        </div>
+      )}
+      <Switch checked={zoom} onChange={setZoom} label="Zoom" description="Setzt automatische Zooms für mehr Dynamik." />
+      <Switch checked={sfx} onChange={setSfx} label="SFX" description="Fügt passende Sound-Effekte ein." />
+    </div>
+  );
+
+  const transcribeTab = (
+    <div className="flex flex-col gap-4">
+      <Switch checked={autoEmphasis} onChange={setAutoEmphasis} label="Auto-Betonung" description="Hebt wichtige Wörter in den Untertiteln automatisch hervor." />
+      {!autoEmphasis && (
+        <div className="flex flex-col gap-4 rounded-lg border border-line bg-sunken p-4">
+          <Field label="Betonung (kommagetrennt)" htmlFor={id("emphasis")}>
+            <input id={id("emphasis")} type="text" value={emphasis} onChange={(e) => setEmphasis(e.target.value)} className={inputClass} placeholder="wort1, wort2" />
+          </Field>
+          <Field label="Starke Betonung (kommagetrennt)" htmlFor={id("emphasis-strong")}>
+            <input id={id("emphasis-strong")} type="text" value={emphasisStrong} onChange={(e) => setEmphasisStrong(e.target.value)} className={inputClass} placeholder="wort1, wort2" />
+          </Field>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Whisper-Modell" htmlFor={id("whisper-model")}>
+          <select id={id("whisper-model")} value={whisperModel} onChange={(e) => setWhisperModel(e.target.value)} className={inputClass}>
+            {WHISPER_MODELS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Engine" htmlFor={id("engine")}>
+          <select id={id("engine")} value={engine} onChange={(e) => setEngine(e.target.value)} className={inputClass}>
+            {ENGINES.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Sprache" htmlFor={id("language")}>
+          <input id={id("language")} type="text" value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass} />
+        </Field>
+        <Field label="GPU" htmlFor={id("gpu")}>
+          <select id={id("gpu")} value={gpu} onChange={(e) => setGpu(e.target.value)} className={inputClass}>
+            {GPU_MODES.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+          </select>
+        </Field>
       </div>
+    </div>
+  );
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+      <Tabs
+        tabs={[
+          { id: "video", label: "Video", content: videoTab },
+          { id: "cut", label: "Schnitt", content: cutTab },
+          { id: "transcribe", label: "Transkription", content: transcribeTab },
+        ]}
+      />
 
       {error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950 dark:text-red-300">
+        <p role="alert" className="flex items-start gap-2.5 rounded-lg border border-accent/50 bg-accent-soft px-3.5 py-3 text-sm text-accent-text">
+          <WarningCircle size={18} weight="fill" className="mt-0.5 shrink-0" />
           {error}
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-      >
-        {submitting ? "Wird gestartet…" : "Render starten"}
-      </button>
+      <div className="flex items-center justify-between gap-4 border-t border-line pt-5">
+        <p className="min-w-0 truncate text-[13px] text-muted">{file ? file.name : "Noch keine Datei ausgewählt"}</p>
+        <button type="submit" disabled={submitting} className={btn("primary")}>
+          {submitting ? <SpinnerGap size={16} weight="bold" className="animate-spin motion-reduce:animate-none" /> : <Play size={16} weight="fill" />}
+          {submitting ? "Wird gestartet…" : "Render starten"}
+        </button>
+      </div>
     </form>
   );
 }

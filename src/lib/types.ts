@@ -32,6 +32,8 @@ export interface Job {
   finished_at: string | null;
 }
 
+export const isActiveJob = (job: Job) => job.status === "queued" || job.status === "running";
+
 export interface CreateJobResponse {
   job_id: string;
   status: "queued";
