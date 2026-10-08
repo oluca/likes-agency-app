@@ -4,7 +4,8 @@ function getBaseUrl(): string {
   if (!url) {
     throw new Error("API_BASE_URL is not configured");
   }
-  return url.replace(/\/+$/, "");
+  const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return withScheme.replace(/\/+$/, "");
 }
 
 function getApiKey(): string {
