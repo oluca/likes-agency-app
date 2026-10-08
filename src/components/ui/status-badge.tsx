@@ -8,6 +8,7 @@ export const STATUS_LABEL: Record<Job["status"], string> = {
   done: "Fertig",
   failed: "Fehlgeschlagen",
   canceled: "Abgebrochen",
+  expired: "Abgelaufen",
 };
 
 const STYLE: Record<Job["status"], string> = {
@@ -16,6 +17,7 @@ const STYLE: Record<Job["status"], string> = {
   done: "border-transparent bg-accent text-accent-fg",
   failed: "border-accent/60 bg-surface text-accent-text",
   canceled: "border-line bg-sunken text-muted line-through decoration-muted/60",
+  expired: "border-line bg-sunken text-muted",
 };
 
 export function StatusBadge({ status, className }: { status: Job["status"]; className?: string }) {
@@ -25,6 +27,7 @@ export function StatusBadge({ status, className }: { status: Job["status"]; clas
     done: <CheckCircle size={14} weight="fill" />,
     failed: <WarningCircle size={14} weight="fill" />,
     canceled: <Prohibit size={14} weight="bold" />,
+    expired: <Timer size={14} weight="bold" />,
   }[status];
 
   return (

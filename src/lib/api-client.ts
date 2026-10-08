@@ -1,79 +1,148 @@
-import type { CreateJobResponse, Job, JobStatus, RenderParams } from "@/lib/types";
+import type { CreateJobResponse, Job, JobStatus, Preset, RenderParams, SourceInfo } from "@/lib/types";
+import { detailText, messageForStatus, NETWORK_ERROR_MESSAGE } from "@/lib/api-messages";
 
 export class ApiError extends Error {
+  /** HTTP status; 0 means the server could not be reached. */
   status: number;
-  detail: unknown;
 
-  constructor(status: number, message: string, detail?: unknown) {
+  constructor(status: number, message: string) {
     super(message);
     this.status = status;
-    this.detail = detail;
   }
 }
 
-async function parseErrorMessage(response: Response): Promise<string> {
+function errorFor(status: number, body: string): ApiError {
+  let detail: string | undefined;
   try {
-    const data = await response.json();
-    if (typeof data?.detail === "string") return data.detail;
-    if (Array.isArray(data?.detail)) {
-      return data.detail
-        .map((d: { loc?: string[]; msg?: string }) =>
-          d?.msg ? `${d.loc?.join(".") ?? "Feld"}: ${d.msg}` : JSON.stringify(d)
-        )
-        .join("; ");
-    }
-    return JSON.stringify(data);
+    detail = detailText(JSON.parse(body)?.detail);
   } catch {
-    return response.statusText || `HTTP ${response.status}`;
+    // not JSON
+  }
+  return new ApiError(status, messageForStatus(status, status === 422 ? detail : undefined));
+}
+
+async function request(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new ApiError(0, NETWORK_ERROR_MESSAGE);
   }
 }
 
 async function handle<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const message = await parseErrorMessage(response.clone());
-    if (response.status === 422) {
-      throw new ApiError(422, `Validierungsfehler: ${message}`);
-    }
-    if (response.status === 409) {
-      throw new ApiError(409, `Job ist noch nicht fertig: ${message}`);
-    }
-    throw new ApiError(response.status, message);
-  }
+  if (!response.ok) throw errorFor(response.status, await response.text().catch(() => ""));
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
-export async function createJob(file: File, params: RenderParams): Promise<CreateJobResponse> {
+export interface CreateJobExtras {
+  source?: Pick<SourceInfo, "duration_s" | "width" | "height">;
+  title?: string;
+  tags?: string[];
+  parentJobId?: string;
+  onProgress?: (fraction: number) => void;
+  signal?: AbortSignal;
+}
+
+/** Uploads with XHR (fetch has no upload progress). The proxy streams the multipart body unchanged. */
+export function createJob(file: File, params: RenderParams, extras: CreateJobExtras = {}): Promise<CreateJobResponse> {
   const formData = new FormData();
   formData.set("file", file);
   formData.set("params", JSON.stringify(params));
 
-  const response = await fetch("/api/jobs", {
-    method: "POST",
-    body: formData,
+  // Metadata for our own database travels in a header so the multipart body can stay streamed untouched.
+  const meta = {
+    filename: file.name,
+    size_bytes: file.size,
+    ...extras.source,
+    title: extras.title,
+    tags: extras.tags,
+    parent_job_id: extras.parentJobId,
+    // free text (emphasis, prompt, fix, sticker) could exceed header limits and is not needed there
+    params: { style: params.style, whisper_model: params.whisper_model, language: params.language },
+  };
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/jobs");
+    xhr.setRequestHeader("x-job-meta", encodeURIComponent(JSON.stringify(meta)));
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) extras.onProgress?.(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as CreateJobResponse);
+        } catch {
+          reject(new ApiError(502, messageForStatus(502)));
+        }
+      } else {
+        reject(errorFor(xhr.status, xhr.responseText));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(0, NETWORK_ERROR_MESSAGE));
+    xhr.ontimeout = xhr.onerror;
+    xhr.onabort = () => reject(new DOMException("Upload abgebrochen", "AbortError"));
+    extras.signal?.addEventListener("abort", () => xhr.abort());
+    xhr.send(formData);
   });
-  return handle<CreateJobResponse>(response);
+}
+
+export interface JobPatch {
+  title?: string;
+  tags?: string[];
+  starred?: boolean;
+  archived?: boolean;
+  deleted?: boolean;
+  shared?: boolean;
+}
+
+export async function patchJob(id: string, patch: JobPatch): Promise<{ ok: true; share_token?: string | null }> {
+  const response = await request(`/api/jobs/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return handle(response);
+}
+
+export async function uploadThumbnail(id: string, blob: Blob): Promise<void> {
+  const response = await request(`/api/jobs/${id}/thumbnail`, {
+    method: "POST",
+    headers: { "content-type": "image/jpeg" },
+    body: blob,
+  });
+  await handle<unknown>(response);
+}
+
+export function thumbnailUrl(id: string): string {
+  return `/api/jobs/${id}/thumbnail`;
+}
+
+export async function getPresets(): Promise<Preset[]> {
+  const response = await request("/api/presets");
+  return handle<Preset[]>(response);
 }
 
 export async function getJob(id: string): Promise<Job> {
-  const response = await fetch(`/api/jobs/${id}`, { cache: "no-store" });
+  const response = await request(`/api/jobs/${id}`, { cache: "no-store" });
   return handle<Job>(response);
 }
 
 export async function getJobLog(id: string): Promise<{ log: string }> {
-  const response = await fetch(`/api/jobs/${id}/log`, { cache: "no-store" });
+  const response = await request(`/api/jobs/${id}/log`, { cache: "no-store" });
   return handle<{ log: string }>(response);
 }
 
 export async function listJobs(status?: JobStatus): Promise<Job[]> {
   const query = status ? `?status=${encodeURIComponent(status)}` : "";
-  const response = await fetch(`/api/jobs${query}`, { cache: "no-store" });
+  const response = await request(`/api/jobs${query}`, { cache: "no-store" });
   return handle<Job[]>(response);
 }
 
-export async function cancelJob(id: string): Promise<void> {
-  const response = await fetch(`/api/jobs/${id}/cancel`, { method: "POST" });
-  await handle<unknown>(response);
+export async function cancelJob(id: string): Promise<{ canceled: boolean }> {
+  const response = await request(`/api/jobs/${id}/cancel`, { method: "POST" });
+  return handle<{ canceled: boolean }>(response);
 }
 
 export function downloadJobUrl(id: string): string {

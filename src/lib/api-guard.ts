@@ -30,11 +30,16 @@ export async function guardJob(id: string): Promise<NextResponse | null> {
   if (!SAFE_JOB_ID.test(id)) return deny(404, "Job nicht gefunden");
 
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("jobs")
     .select("id")
     .eq("upstream_job_id", id)
     .eq("workspace_id", auth.workspace.workspaceId)
     .maybeSingle();
+  // A failed lookup is not "unknown job": report it as a transient server error so clients keep polling.
+  if (error) {
+    console.error(`guardJob lookup failed for ${id}:`, error.message);
+    return deny(503, "Datenbank vorübergehend nicht erreichbar");
+  }
   return data ? null : deny(404, "Job nicht gefunden");
 }

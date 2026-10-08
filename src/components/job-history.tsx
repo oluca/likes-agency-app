@@ -1,8 +1,13 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { CaretRight, FilmSlate, MagnifyingGlass, X } from "@phosphor-icons/react/ssr";
+import { Archive, CaretRight, FilmSlate, MagnifyingGlass, Star, X } from "@phosphor-icons/react/ssr";
+import { patchJob, thumbnailUrl, ApiError, type JobPatch } from "@/lib/api-client";
+import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge, STATUS_LABEL } from "@/components/ui/status-badge";
 import { btn, cn, inputClass, tableCell, tableHead } from "@/lib/ui";
@@ -11,7 +16,9 @@ import { isActiveJob, type Job } from "@/lib/types";
 const PAGE_SIZE = 20;
 
 const FILTERS = [
-  { id: "all", label: "Alle", match: () => true },
+  { id: "all", label: "Alle", match: (j: Job) => !j.meta?.archived_at },
+  { id: "starred", label: "Markiert", match: (j: Job) => !!j.meta?.starred },
+  { id: "archived", label: "Archiv", match: (j: Job) => !!j.meta?.archived_at },
   { id: "active", label: "Aktiv", match: isActiveJob },
   { id: "done", label: "Fertig", match: (j: Job) => j.status === "done" },
   { id: "problem", label: "Fehler", match: (j: Job) => j.status === "failed" || j.status === "canceled" },
@@ -22,11 +29,28 @@ const DATE = new Intl.DateTimeFormat("de-DE", { day: "2-digit", month: "2-digit"
 interface JobHistoryProps {
   jobs: Job[] | null;
   error: string | null;
-  onSelect: (jobId: string) => void;
-  activeId: string | null;
+  onChanged: () => void;
 }
 
-export function JobHistory({ jobs, error, onSelect, activeId }: JobHistoryProps) {
+function formatDuration(s: number | null | undefined) {
+  if (s == null) return "–";
+  const m = Math.floor(s / 60);
+  return `${m}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+}
+
+export function JobHistory({ jobs, error, onChanged }: JobHistoryProps) {
+  const toast = useToast();
+  const router = useRouter();
+
+  async function toggle(job: Job, patch: JobPatch) {
+    try {
+      await patchJob(job.id, patch);
+      onChanged();
+    } catch (err) {
+      toast({ tone: "error", title: "Änderung fehlgeschlagen", description: err instanceof ApiError ? err.message : undefined });
+    }
+  }
+
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["id"]>("all");
   const [limit, setLimit] = useState(PAGE_SIZE);
@@ -35,7 +59,14 @@ export function JobHistory({ jobs, error, onSelect, activeId }: JobHistoryProps)
     const match = FILTERS.find((f) => f.id === filter)!.match;
     const q = query.trim().toLowerCase();
     return (jobs ?? []).filter(
-      (j) => match(j) && (!q || j.id.toLowerCase().includes(q) || STATUS_LABEL[j.status].toLowerCase().includes(q))
+      (j) =>
+        match(j) &&
+        (!q ||
+          j.id.toLowerCase().includes(q) ||
+          STATUS_LABEL[j.status].toLowerCase().includes(q) ||
+          (j.meta?.title ?? "").toLowerCase().includes(q) ||
+          (j.meta?.filename ?? "").toLowerCase().includes(q) ||
+          (j.meta?.tags ?? []).some((t) => t.toLowerCase().includes(q)))
     );
   }, [jobs, query, filter]);
 
@@ -83,7 +114,7 @@ export function JobHistory({ jobs, error, onSelect, activeId }: JobHistoryProps)
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Job-ID oder Status suchen"
+            placeholder="Titel, Job-ID oder Status suchen"
             aria-label="Jobs durchsuchen"
             className={cn(inputClass, "pl-9")}
           />
@@ -150,38 +181,75 @@ export function JobHistory({ jobs, error, onSelect, activeId }: JobHistoryProps)
             </thead>
             <tbody className="divide-y divide-line">
               {visible.map((job) => {
-                const selected = job.id === activeId;
                 return (
                   <tr
                     key={job.id}
-                    onClick={() => onSelect(job.id)}
-                    className={cn(
-                      "cursor-pointer transition-colors duration-150 hover:bg-sunken",
-                      selected && "bg-accent-soft hover:bg-accent-soft"
-                    )}
+                    onClick={() => router.push(`/jobs/${encodeURIComponent(job.id)}`)}
+                    className="cursor-pointer transition-colors duration-150 hover:bg-sunken"
                   >
                     <td className={cn(tableCell, "max-w-[12rem] sm:max-w-xs")}>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelect(job.id);
-                        }}
-                        aria-current={selected ? "true" : undefined}
-                        className="block w-full truncate text-left font-mono text-xs text-fg"
+                      <Link
+                        href={`/jobs/${encodeURIComponent(job.id)}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex w-full items-center gap-3 text-left"
                         title={job.id}
                       >
-                        {job.id}
-                      </button>
+                        {job.meta?.thumbnail_path ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={thumbnailUrl(job.id)} alt="" loading="lazy" className="h-9 w-16 shrink-0 rounded-md bg-sunken object-cover" />
+                        ) : (
+                          <span className="flex h-9 w-16 shrink-0 items-center justify-center rounded-md bg-sunken text-muted">
+                            <FilmSlate size={16} />
+                          </span>
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm text-fg">{job.meta?.title ?? job.id}</span>
+                          <span className="tabular block truncate text-xs text-muted">
+                            {formatDuration(job.meta?.source_duration_s)}
+                            {job.meta && job.meta.credits_charged > 0 && ` · ${job.meta.credits_charged} Credits`}
+                          </span>
+                        </span>
+                      </Link>
                     </td>
                     <td className={tableCell}>
                       <StatusBadge status={job.status} />
+                      {job.status === "running" && (
+                        <Progress
+                          value={job.progress}
+                          label={`Fortschritt ${job.meta?.title ?? job.id}`}
+                          valueText={`${Math.round(job.progress ?? 0)} Prozent`}
+                          className="mt-2 h-1 w-24"
+                        />
+                      )}
                     </td>
                     <td className={cn(tableCell, "tabular hidden text-muted sm:table-cell")}>
                       {DATE.format(new Date(job.created_at))}
                     </td>
-                    <td className="pr-3 text-muted">
-                      <CaretRight size={14} />
+                    <td className="whitespace-nowrap pr-3 text-muted">
+                      <button
+                        type="button"
+                        aria-pressed={!!job.meta?.starred}
+                        aria-label={job.meta?.starred ? "Markierung entfernen" : "Markieren"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggle(job, { starred: !job.meta?.starred });
+                        }}
+                        className="p-1 hover:text-fg"
+                      >
+                        <Star size={14} weight={job.meta?.starred ? "fill" : "regular"} />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={job.meta?.archived_at ? "Aus Archiv holen" : "Archivieren"}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggle(job, { archived: !job.meta?.archived_at });
+                        }}
+                        className="p-1 hover:text-fg"
+                      >
+                        <Archive size={14} />
+                      </button>
+                      <CaretRight size={14} className="ml-1 inline" />
                     </td>
                   </tr>
                 );

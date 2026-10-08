@@ -6,9 +6,11 @@ Multi-tenant web app in front of a video render service. Next.js 16 (App Router)
 
 1. Create a Supabase project. In **Project Settings → API** copy the project URL and the publishable (anon) key.
 2. `cp .env.example .env.local` and fill in:
-   - `SHORTFORM_API_URL`, `SHORTFORM_API_KEY` (render service, server-only)
+   - `API_BASE_URL`, `API_KEY` (render API, server-only; the old `SHORTFORM_API_*` names still work)
+   - `MAX_UPLOAD_MB` (upload limit, default 500)
    - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-3. Apply the schema: run every file in `supabase/migrations/` in order (0001 → 0003) in the Supabase SQL editor (or `supabase link` + `supabase db push`).
+   - `SUPABASE_SERVICE_ROLE_KEY` (server-only; needed to store status, durations and billing on jobs)
+3. Apply the schema: run every file in `supabase/migrations/` in order (0001 → 0005) in the Supabase SQL editor (or `supabase link` + `supabase db push`).
 4. In **Authentication → URL Configuration** set the Site URL and add `<origin>/auth/callback` to the redirect URLs.
 5. `npm install && npm run dev`
 
